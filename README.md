@@ -1,4 +1,4 @@
-<img src="rawassets/index2.png" width="150">
+<img src="rawassets/index2.png" width="130">
 
 # Introduction
 
@@ -63,16 +63,16 @@ pretty much all songs. K, have fun listening!
 
 First off, FBInk by NiLuJe bundled with USBnet. 
 
-The built-in `aplayer` is terrible for advanced control of media playback, and so here
+The built-in `aplayer` is terrible for advanced control of media playback, and so here<br/>
 I use the awesome `mplayer` binary built for the Kindle by the user `Smarter`
 
 Link: https://www.mobileread.com/forums/showthread.php?t=119851&highlight=winamp
 
-WMCtrl and the UI disabling script are the product of twobob's work from here, it made all the
-difference for the UI
+WMCtrl and the UI disabling script are the product of twobob's work from here, it made all the<br/>
+difference for the UI<br/>
 https://www.mobileread.com/forums/showthread.php?t=194270
 
-Icons:
-https://online.rapidresizer.com/photograph-to-pattern.php
-https://pixabay.com/vectors/note-sound-music-melody-concert-24074/
+Icons:<br/>
+https://online.rapidresizer.com/photograph-to-pattern.php<br/>
+https://pixabay.com/vectors/note-sound-music-melody-concert-24074/<br/>
 https://pixabay.com/photos/reindeer-elk-deer-buck-antlers-5635891/
