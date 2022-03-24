@@ -1,4 +1,5 @@
 mod toc;
+mod read_config;
 mod pointer_events;
 mod process_runner;
 mod logger;
@@ -93,60 +94,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //logger test (will exit)
     //logger::test();
 
+    //reading config
+    let config = read_config::read_config();
+
     //check catalog
     log!("main", "reading tracks...");
     let mut albums: HashMap<String, Vec<Track>> = HashMap::new();
     let mut albums_order: Vec<(String, i32, String)> = Vec::new();
 
-    log!("main", "opening /mnt/us/music...");
+    log!("main", "opening music directories...");
     quick_write(1, "* Cataloging...");
-    for entry in WalkDir::new("/mnt/us/music").into_iter().filter_entry(|e| !is_hidden(e)) {
-        let entry = result!(entry);
-        match entry.path().extension() {
-            None => continue,
-            Some(ext) => if ext != "mp3" && ext != "wav" { continue; }
+    for music_dir in &config.music_dirs {
+        for entry in WalkDir::new(music_dir).into_iter().filter_entry(|e| !is_hidden(e)) {
+            let entry = result!(entry);
+            match entry.path().extension() {
+                None => continue,
+                Some(ext) => if ext != "mp3" && ext != "wav" { continue; }
+            }
+            //default values in case tag is not available
+            let mut title = entry.path().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or("".into());
+            let mut artist = String::new();
+            let mut album = entry.path().parent().unwrap().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or("".into());
+            let mut track: u32 = 0;
+            let mut disc: u32 = 1;
+            let mut year: i32 = 0;
+            //read tag
+            let tag_result = Tag::read_from_path(entry.path());
+            let mut tag_to_store: Option<Tag> = None;
+            if let Ok(tag) = tag_result {
+                if let Some(id3artist) = tag.artist() {
+                    artist = String::from(id3artist);
+                }
+                if let Some(id3title) = tag.title() {
+                    title = String::from(id3title);
+                }
+                if let Some(id3album) = tag.album() {
+                    album = String::from(id3album);
+                }
+                if let Some(id3track) = tag.track() {
+                    track = id3track;
+                }
+                if let Some(id3disc) = tag.disc() {
+                    disc = id3disc;
+                }
+                if let Some(id3year) = tag.year() {
+                    year = id3year;
+                }
+                if let Some(a) = tag.get("TDOR") {
+                    year = a.content().text().unwrap().parse::<i32>().unwrap();
+                } else if let Some(a) = tag.get("TORY") {
+                    year = a.content().text().unwrap().parse::<i32>().unwrap();
+                }
+                tag_to_store = Some(tag);
+            }
+            if !albums.contains_key(&album) {
+                albums.insert(album.clone(), Vec::new());
+            }
+            albums_order.push((artist.clone(), year, album.clone()));
+            albums.get_mut(&album).unwrap().push(Track { path: entry.into_path(), title, artist, album, track, disc, year, tag: tag_to_store });
         }
-        //default values in case tag is not available
-        let mut title = entry.path().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or("".into());
-        let mut artist = String::new();
-        let mut album = entry.path().parent().unwrap().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or("".into());
-        let mut track: u32 = 0;
-        let mut disc: u32 = 1;
-        let mut year: i32 = 0;
-        //read tag
-        let tag_result = Tag::read_from_path(entry.path());
-        let mut tag_to_store: Option<Tag> = None;
-        if let Ok(tag) = tag_result {
-            if let Some(id3artist) = tag.artist() {
-                artist = String::from(id3artist);
-            }
-            if let Some(id3title) = tag.title() {
-                title = String::from(id3title);
-            }
-            if let Some(id3album) = tag.album() {
-                album = String::from(id3album);
-            }
-            if let Some(id3track) = tag.track() {
-                track = id3track;
-            }
-            if let Some(id3disc) = tag.disc() {
-                disc = id3disc;
-            }
-            if let Some(id3year) = tag.year() {
-                year = id3year;
-            }
-            if let Some(a) = tag.get("TDOR") {
-                year = a.content().text().unwrap().parse::<i32>().unwrap();
-            } else if let Some(a) = tag.get("TORY") {
-                year = a.content().text().unwrap().parse::<i32>().unwrap();
-            }
-            tag_to_store = Some(tag);
-        }
-        if !albums.contains_key(&album) {
-            albums.insert(album.clone(), Vec::new());
-        }
-        albums_order.push((artist.clone(), year, album.clone()));
-        albums.get_mut(&album).unwrap().push(Track { path: entry.into_path(), title, artist, album, track, disc, year, tag: tag_to_store });
     }
 
     log!("main", "sorting...");
