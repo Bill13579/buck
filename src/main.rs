@@ -32,6 +32,7 @@ pub struct Track {
     artist: String,
     album: String,
     track: u32,
+    disc: u32,
     year: i32,
     tag: Option<Tag>
 }
@@ -110,6 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut artist = String::new();
         let mut album = entry.path().parent().unwrap().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or("".into());
         let mut track: u32 = 0;
+        let mut disc: u32 = 1;
         let mut year: i32 = 0;
         //read tag
         let tag_result = Tag::read_from_path(entry.path());
@@ -127,6 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(id3track) = tag.track() {
                 track = id3track;
             }
+            if let Some(id3disc) = tag.disc() {
+                disc = id3disc;
+            }
             if let Some(id3year) = tag.year() {
                 year = id3year;
             }
@@ -141,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             albums.insert(album.clone(), Vec::new());
         }
         albums_order.push((artist.clone(), year, album.clone()));
-        albums.get_mut(&album).unwrap().push(Track { path: entry.into_path(), title, artist, album, track, year, tag: tag_to_store });
+        albums.get_mut(&album).unwrap().push(Track { path: entry.into_path(), title, artist, album, track, disc, year, tag: tag_to_store });
     }
 
     log!("main", "sorting...");
@@ -158,7 +163,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for a in albums_order {
         let album = albums.get_mut(&a.2).unwrap();
-        album.sort_by(|a, b| a.track.partial_cmp(&b.track).unwrap());
+        album.sort_by(|a, b| {
+            if a.disc == b.disc {
+                a.track.partial_cmp(&b.track).unwrap()
+            } else {
+                a.disc.partial_cmp(&b.disc).unwrap()
+            }
+        });
         tracks.append(album);
     }
 
