@@ -7,6 +7,7 @@ use process_runner::quick_run;
 use walkdir::{WalkDir};
 use id3::{Tag, TagLike, frame::PictureType};
 use pointer_events::{PointerEventsReader, PointerEventsKeeper, CapturedPointerEvent, Coords};
+use std::collections::HashMap;
 use std::io::{Write, BufReader, Read};
 use std::ops::{Add, Sub};
 use std::os::unix::net::UnixListener;
@@ -93,7 +94,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     //check catalog
     log!("main", "reading tracks...");
-    let mut tracks: Vec<Track> = Vec::new();
+    let mut albums: HashMap<String, Vec<Track>> = HashMap::new();
+    let mut albums_order: Vec<(String, i32, String)> = Vec::new();
 
     log!("main", "opening /mnt/us/music...");
     quick_write(1, "* Cataloging...");
@@ -135,21 +137,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             tag_to_store = Some(tag);
         }
-        tracks.push(Track { path: entry.into_path(), title, artist, album, track, year, tag: tag_to_store });
+        if !albums.contains_key(&album) {
+            albums.insert(album.clone(), Vec::new());
+        }
+        albums_order.push((artist.clone(), year, album.clone()));
+        albums.get_mut(&album).unwrap().push(Track { path: entry.into_path(), title, artist, album, track, year, tag: tag_to_store });
     }
 
     log!("main", "sorting...");
     // sort catalog
-    tracks.sort_by(|a, b|
-        if !a.album.eq_ignore_ascii_case(&b.album) {
-            if a.artist.eq_ignore_ascii_case(&b.artist) {
-                a.year.partial_cmp(&b.year).unwrap()
-            } else {
-                a.artist.partial_cmp(&b.artist).unwrap()
-            }
+    albums_order.sort_by(|a, b| {
+        if a.0.eq_ignore_ascii_case(&b.0) {
+            b.1.partial_cmp(&a.1).unwrap()
         } else {
-            a.track.partial_cmp(&b.track).unwrap()
-        });
+            a.0.partial_cmp(&b.0).unwrap()
+        }
+    });
+
+    let mut tracks: Vec<Track> = Vec::new();
+
+    for a in albums_order {
+        let album = albums.get_mut(&a.2).unwrap();
+        album.sort_by(|a, b| a.track.partial_cmp(&b.track).unwrap());
+        tracks.append(album);
+    }
 
     // for now, print catalog
     /*for t in tracks.iter() {
