@@ -15,7 +15,7 @@ pub struct BuckConfig {
 }
 
 pub fn read_config() -> BuckConfig {
-    let config_path = result!(env::current_exe()).join("config.json");
+    let config_path = result!(env::current_exe()).parent().unwrap().join("config.json");
     let mut config_file = result!(OpenOptions::new().write(false).read(true).create(false).open(config_path));
     let mut config_str = String::new();
     config_file.read_to_string(&mut config_str);
