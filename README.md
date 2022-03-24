@@ -55,8 +55,9 @@ In KUAL, you'll also have an option to restart Buck. This is if you add new song
 **A Note About Volume:**<br/>
 **100% IS PROBABLY NOT THE BEST VOLUME!**<br/>
 The Kindle Touch is very quiet, and so there is software volume boosting going on.<br/>
-By default 100% is actually 190%. Although it works for some songs, I recommend<br/>
-sticking to **about 90%**. It gives the best balance between loudness and compatibility with<br/>
+By default 100% is actually 150%. Although it works for some songs, I recommend<br/>
+sticking to **about 90%** (although if you know a song works with 100, go for it!)<br/>
+It gives the best balance between loudness and compatibility with<br/>
 pretty much all songs. K, have fun listening!
 
 # Credits
