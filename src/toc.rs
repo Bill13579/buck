@@ -27,12 +27,16 @@ pub fn gentoc(tracks: &Vec<Track>) {
     header.set_alignment(Alignment::Left);
     doc.push(header.padded(Margins::trbl(0 as i8, 0 as i8, 10 as i8, 0 as i8)));
 
-    let calculate_optimal_layout = |text1len: usize, text2len: usize, text2min: usize| -> Vec<usize> {
+    let calculate_optimal_layout = |text1len: usize, text2len: usize, text1min: usize, text2min: usize| -> Vec<usize> {
         let mut left = ((text1len as f64 / (text1len + text2len) as f64) * 100.0).floor() as usize;
         let mut right = 100 - left;
         if right < text2min {
             right = text2min;
             left = 100 - text2min;
+        }
+        if left < text1min {
+            left = text1min;
+            right = 100 - text1min;
         }
         vec![left, right]
     };
@@ -51,7 +55,7 @@ pub fn gentoc(tracks: &Vec<Track>) {
         title_p.set_alignment(Alignment::Left);
         let mut artist_p = genpdf::elements::Paragraph::default().styled_string(artist, Style::new().with_font_size(22).with_color(Color::Rgb(59, 59, 59)));
         artist_p.set_alignment(Alignment::Right);
-        let mut table = genpdf::elements::TableLayout::new(calculate_optimal_layout(title.len(), artist.len(), 20));
+        let mut table = genpdf::elements::TableLayout::new(calculate_optimal_layout(title.len(), artist.len(), 40, 20));
         table.row()
             .element(title_p)
             .element(artist_p)
@@ -62,7 +66,7 @@ pub fn gentoc(tracks: &Vec<Track>) {
     let gen_song_layout = |title: &str, artist: &str, pos: u32, first_track: &mut bool| -> TableLayout {
         let mut pos_style = Style::new().with_font_size(20);
         if *first_track {
-            pos_style = Style::new().with_font_size(26).italic();
+            pos_style = Style::new().with_font_size(21).italic();
             *first_track = false;
         }
         let mut pos_p = genpdf::elements::Paragraph::default().styled_string(format!("{}. ", pos.to_string()), pos_style);
@@ -71,7 +75,7 @@ pub fn gentoc(tracks: &Vec<Track>) {
         title_p.set_alignment(Alignment::Left);
         let mut artist_p = genpdf::elements::Paragraph::default().styled_string(artist, Style::new().with_font_size(20).with_color(Color::Rgb(117, 117, 117)));
         artist_p.set_alignment(Alignment::Right);
-        let mut l = calculate_optimal_layout(title.len(), artist.len(), 25);
+        let mut l = calculate_optimal_layout(title.len(), artist.len(), 40, 25);
         l.insert(0, 11);
         let mut table = genpdf::elements::TableLayout::new(l);
         table.row()
