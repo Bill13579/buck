@@ -63,15 +63,15 @@ pretty much all songs. K, have fun listening!
 
 # Credits
 
-First off, FBInk by NiLuJe bundled with USBnet. 
+First off, the amazing FBInk by NiLuJe bundled with USBnet. The ability to draw whatever on screen is... so powerful...
 
 The built-in `aplayer` is terrible for advanced control of media playback, and so here<br/>
-I use the awesome `mplayer` binary built for the Kindle by the user `Smarter`
+I use the great `mplayer` binary built for the Kindle by the user `Smarter`
 
 Link: https://www.mobileread.com/forums/showthread.php?t=119851&highlight=winamp
 
 WMCtrl and the UI disabling script are the product of twobob's work from here, it made all the<br/>
-difference for the UI<br/>
+difference for the UI, otherwise clicking on anything would accidentally open a book!<br/>
 https://www.mobileread.com/forums/showthread.php?t=194270
 
 Icons:<br/>
