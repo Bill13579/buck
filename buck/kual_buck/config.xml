@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<extension>
+    <information>
+        <name>Buck</name>
+        <version>1.0</version>
+        <author>apricorn</author>
+        <id>BUCK-LAUNCHER-MENU-ADD-ON</id>
+    </information>
+    <menus>
+        <menu type="json" dynamic="true">menu.json</menu>
+    </menus>
+</extension>

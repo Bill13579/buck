@@ -1,0 +1,5 @@
+{
+   "items": [
+      {"name": "Buck - Reindex Music Directory", "action": "./launch.sh"}
+   ]
+ }
