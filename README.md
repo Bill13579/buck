@@ -16,7 +16,7 @@ E-ink devices have traditionally been only for reading... well no more!
 <img src="screenshots/buck-search-bar-cmd.png" width="350"><br/>
 
 - Here's what the GUI looks like<br/>
-  Tap near the top to control volume!<br/>
+  Tap near the top to control volume and the bottom right to close!<br/>
 <img src="screenshots/buck-ui.png" width="350"><br/>
 
 ** Playlist support is not planned at the moment<br/>
