@@ -21,15 +21,46 @@ E-ink devices have traditionally been only for reading... well no more!
 
 ** Playlist support is not planned at the moment<br/>
 
-# Installation
+# Installation on (Audiobook-enabled) Kobo devices
+
+1. Stop Nickel from scanning hidden directories
+```
+Add
+
+  [FeatureSettings]
+  ExcludeSyncFolders=\\.(?!kobo|adobe).*?
+
+to
+
+  (from USB connection) .kobo/Kobo/Kobo\ eReader.conf
+```
+
+2. Setup Bluetooth playback
+```
+Add
+
+  defaults.bluealsa.device "00:00:00:00:00:00"
+
+to
+
+  (from telnet connection, temporarily enable via devmodeon in the search bar) /etc/alsa/conf.d/20-bluealsa.conf
+```
+
+3. Install <a href="https://github.com/pgaskin/NickelMenu/releases">NickelMenu</a>
+
+4. Install <a href="https://www.mobileread.com/forums/showthread.php?t=299110">FBink</a>
+
+5. Install **Buck** using the <a href="KoboRoot.tgz">KoboRoot.tgz</a> file in this repository
+
+# Installation on Kindle Touch (K5)
 
 Requirements:
 - USBnet
 - KUAL
 
-In the root directory of this repo is a folder named `buck`. That's everything you'll need.
+In the root directory of this repo is a folder named `buck-k5`. That's everything you'll need.
 
-1. Move the `buck` folder to your `/mnt/us/` folder<br/>
+1. Move the `buck-k5` folder to your `/mnt/us/` folder and rename to `buck`<br/>
 Folder structure:
 - `/mnt/us/buck/buck`
 - `/mnt/us/buck/buck-cli`
@@ -63,15 +94,14 @@ pretty much all songs. K, have fun listening!
 
 # Credits
 
-First off, the amazing FBInk by NiLuJe bundled with USBnet. The ability to draw whatever on screen is... so powerful...
+First off, the amazing FBInk by NiLuJe bundled with USBnet. The ability to draw whatever on screen is... very powerful
 
-The built-in `aplayer` is terrible for advanced control of media playback, and so here<br/>
-I use the great `mplayer` binary built for the Kindle by the user `Smarter`
-
+The built-in `aplayer` is terrible for advanced control of media playback, and so for the K5 version<br/>
+I use the great `mplayer` binary built for the K5 by the user `Smarter`<br/>
 Link: https://www.mobileread.com/forums/showthread.php?t=119851&highlight=winamp
 
-WMCtrl and the UI disabling script are the product of twobob's work from here, it made all the<br/>
-difference for the UI, otherwise clicking on anything would accidentally open a book!<br/>
+WMCtrl and the UI disabling script are the product of twobob's work from here, it allowed<br/>
+for much faster prototyping with the first release of the K5 version<br/>
 https://www.mobileread.com/forums/showthread.php?t=194270
 
 Icons:<br/>
