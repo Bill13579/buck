@@ -93,14 +93,13 @@ pretty much all songs. K, have fun listening!
 
 # Credits
 
-First off, the amazing FBInk by NiLuJe bundled with USBnet. The ability to draw whatever on screen is... very powerful
+The amazing FBInk by NiLuJe. The ability to draw anything on screen is... quite powerful
 
-The built-in `aplayer` is terrible for advanced control of media playback, and so for the K5 version<br/>
-I use the great `mplayer` binary built for the K5 by the user `Smarter`<br/>
+The built-in `aplayer` is terrible for advanced control of media playback, and so I use mplayer instead.<br/>
+For the K5 version, I use the great `mplayer` binary built for the K5 by the user `Smarter` in 2011<br/>
 Link: https://www.mobileread.com/forums/showthread.php?t=119851&highlight=winamp
 
-WMCtrl and the UI disabling script are the product of twobob's work from here, it allowed<br/>
-for much faster prototyping with the first release of the K5 version<br/>
+WMCtrl and the UI disabling scripts by twobob<br/>
 https://www.mobileread.com/forums/showthread.php?t=194270
 
 Icons:<br/>
