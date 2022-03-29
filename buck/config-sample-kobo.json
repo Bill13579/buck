@@ -1,0 +1,15 @@
+{
+    "ui": {
+        "width": 1264,
+        "height": 1680,
+        "scale": 1.6
+    },
+    "documents_dir": "/mnt/onboard/buck",
+    "music_dirs": [
+        "/mnt/onboard/music"
+    ],
+    "event_paths": {
+        "pointer": "/dev/input/by-path/platform-1-0010-event"
+    },
+    "disable_scrub": true
+}

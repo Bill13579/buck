@@ -4,6 +4,7 @@ mod pointer_events;
 mod process_runner;
 mod logger;
 mod btctl_keepalive;
+mod utils;
 
 use process_runner::quick_run;
 use walkdir::{WalkDir};
@@ -24,6 +25,7 @@ use std::{process::{Command, Output}, os::unix::prelude::CommandExt};
 use std::{str, vec, fmt};
 use std::fs::{self, OpenOptions};
 use std::io::BufRead;
+use utils::elapsed::Elapsed;
 
 use crate::read_config::root;
 use crate::process_runner::quick_write;
@@ -37,6 +39,7 @@ pub struct Track {
     track: u32,
     disc: u32,
     year: i32,
+    album_artist: String,
     tag: Option<Tag>
 }
 
@@ -113,6 +116,30 @@ fn kill_and_wait(child: &mut Child) {
     sleep(Duration::from_millis(100));
 }
 
+struct Album {
+    artists: HashMap<String, usize>,
+    tracks: Vec<Track>
+}
+impl Album {
+    pub fn new() -> Album {
+        Album { artists: HashMap::new(), tracks: Vec::new() }
+    }
+    pub fn push(&mut self, t: Track) {
+        *self.artists.entry(t.artist.clone()).or_insert(0) += 1;
+        self.tracks.push(t);
+    }
+    pub fn tracks(&mut self) -> &mut Vec<Track> {
+        &mut self.tracks
+    }
+    pub fn artist(&self) -> String {
+        if let Some(a) = self.artists.iter().max_by(|x, y| x.1.cmp(y.1)) {
+            a.0.clone()
+        } else {
+            String::new()
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     //logger test (will exit)
@@ -123,7 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     //check catalog
     log!("main", "reading tracks...");
-    let mut albums: HashMap<String, Vec<Track>> = HashMap::new();
+    let mut albums: HashMap<String, Album> = HashMap::new();
     let mut albums_order: Vec<(String, i32, String)> = Vec::new();
 
     log!("main", "opening music directories...");
@@ -172,10 +199,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tag_to_store = Some(tag);
             }
             if !albums.contains_key(&album) {
-                albums.insert(album.clone(), Vec::new());
+                albums.insert(album.clone(), Album::new());
             }
             albums_order.push((artist.clone(), year, album.clone()));
-            albums.get_mut(&album).unwrap().push(Track { path: entry.into_path(), title, artist, album, track, disc, year, tag: tag_to_store });
+            albums.get_mut(&album).unwrap().push(Track { path: entry.into_path(), title, artist, album, track, disc, year, album_artist: String::new(), tag: tag_to_store });
         }
     }
 
@@ -193,20 +220,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for a in albums_order {
         let album = albums.get_mut(&a.2).unwrap();
-        album.sort_by(|a, b| {
+        album.tracks().sort_by(|a, b| {
             if a.disc == b.disc {
                 a.track.partial_cmp(&b.track).unwrap()
             } else {
                 a.disc.partial_cmp(&b.disc).unwrap()
             }
         });
-        tracks.append(album);
+        let album_artist = album.artist();
+        if let Some(first_track) = album.tracks().get_mut(0) {
+            first_track.album_artist = album_artist;
+        }
+        tracks.append(album.tracks());
     }
 
     // for now, print catalog
     /*for t in tracks.iter() {
         println!("{}/{} {} - {}", t.album, t.track, t.artist, t.title)
     }*/
+
+    if tracks.len() == 0 {
+        quick_write(2, "* Music directory is empty, nothing to play");
+        quick_write(3, "   Exiting");
+        exit(0);
+    }
 
     log!("main", "starting T.O.C. generation...");
     // generate T.O.C. pdf
@@ -312,13 +349,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         stdin.write_all(b"pause\n");
                     },
                     ControlMsg::SEEK_FORWARD() => {
-                        if let Some(ka) = &mut btonly_keepalive { ka.scan_on_temp(); }
+                        if cfg!(feature = "btonly") {
+                            if let Some(ka) = &mut btonly_keepalive { ka.scan_on_temp(); }
+                        }
                         set_currently_paused(&mut currently_paused, false);
                         log!("player-control", "mplayer: {}", "seek");
                         stdin.write_all(b"seek 5 0\n");
                     },
                     ControlMsg::SEEK_BACKWARD() => {
-                        if let Some(ka) = &mut btonly_keepalive { ka.scan_on_temp(); }
+                        if cfg!(feature = "btonly") {
+                            if let Some(ka) = &mut btonly_keepalive { ka.scan_on_temp(); }
+                        }
                         set_currently_paused(&mut currently_paused, false);
                         log!("player-control", "mplayer: {}", "seek");
                         stdin.write_all(b"seek -5 0\n");
@@ -442,7 +483,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     event_manager.start_thread();
     println!("BBB2");
     log!("main", "giving control to ui...");
-    ui(&tx, &reply_rx, event_manager, config.ui.width, config.ui.height, config.ui.scale);
+    ui(&tx, &reply_rx, event_manager, config.ui.width, config.ui.height, config.ui.scale, config.disable_scrub);
 
     Ok(())
 
@@ -462,56 +503,55 @@ fn draw_text_with_bg(text: &str, size: u32, top: u32, left: u32, font: &str, bg_
     quick_run("fbink", vec!["-t", &options, "-C", fg_color, "-B", bg_color, text]);
 }
 
-struct Elapsed {
-    last: Instant
+struct BoundingBoxTextInteractive {
+    x_start: u32,
+    x_end: u32,
+    y_start: u32,
+    y_end: u32,
+    x_display_pad: u32,
+    y_display_pad: u32,
+    content: String,
+    font_size: u32,
+    bg_color: String,
+    fg_color: String,
+    elapsed: Elapsed,
+    disabled: bool
 }
-impl Elapsed {
-    pub fn new() -> Elapsed {
-        Elapsed { last: Instant::now() }
-    }
-    pub fn elapsed(&self) -> Duration {
-        Instant::now().duration_since(self.last)
-    }
-    pub fn update(&mut self) {
-        self.last = Instant::now();
-    }
-}
-
-// x_start, x_end, y_start, y_end, content, font_size
-struct BoundingBoxTextInteractive (
-    u32,
-    u32,
-    u32,
-    u32,
-    String,
-    u32,
-    String,
-    String,
-    Elapsed
-);
 impl BoundingBoxTextInteractive {
+    fn new(x_start: u32, x_end: u32, y_start: u32, y_end: u32, x_display_pad: u32, y_display_pad: u32, content: String, font_size: u32, bg_color: String, fg_color: String, elapsed: Elapsed) -> BoundingBoxTextInteractive {
+        BoundingBoxTextInteractive { x_start, x_end, y_start, y_end, x_display_pad, y_display_pad, content, font_size, bg_color, fg_color, elapsed, disabled: false }
+    }
+    fn disable(&mut self) {
+        self.disabled = true;
+    }
     fn draw(&self) {
-        draw_text(&self.4, self.5, self.2, self.0, "regular", &self.6, &self.7);
+        if !self.disabled {
+            draw_text(&self.content, self.font_size, self.y_start + self.y_display_pad, self.x_start + self.x_display_pad, "regular", &self.bg_color, &self.fg_color);
+        }
     }
     fn draw_over(&self) {
-        clear_canvas_partly("black", self.2, self.0, self.1-self.0, self.3-self.2);
+        clear_canvas_partly("black", self.y_start, self.x_start, self.x_end-self.x_start, self.y_end-self.y_start);
     }
     fn draw_dbg(&self) {
-        clear_canvas_partly("WHITE", self.2, self.0, self.1-self.0, self.3-self.2);
+        clear_canvas_partly("WHITE", self.y_start, self.x_start, self.x_end-self.x_start, self.y_end-self.y_start);
     }
     fn colliding(&self, x: u32, y: u32) -> bool {
-        x >= self.0 && x <= self.1 && y >= self.2 && y <= self.3
-    }
-    fn colliding_coords(&mut self, coords: &Coords) -> bool {
-        if self.8.elapsed() < Duration::from_millis(200) {
+        if self.disabled {
             false
         } else {
-            self.8.update();
+            x >= self.x_start && x <= self.x_end && y >= self.y_start && y <= self.y_end
+        }
+    }
+    fn colliding_coords(&mut self, coords: &Coords) -> bool {
+        if self.elapsed.elapsed() < Duration::from_millis(200) {
+            false
+        } else {
+            self.elapsed.update();
             self.colliding(coords.x as u32, coords.y as u32)
         }
     }
     fn local_coords(&self, x: u32, y: u32) -> Coords {
-        Coords { x: (x - self.0) as u32, y: (y - self.2) as u32 }
+        Coords { x: (x - self.x_start) as u32, y: (y - self.y_start) as u32 }
     }
 }
 
@@ -571,11 +611,11 @@ fn draw_two_state(b: &bool, on: &BoundingBoxTextInteractive, off: &BoundingBoxTe
 }
 
 fn clear_canvas(color: &str) {
-    quick_run("fbink", vec!["--cls", &format!("--background={}", &color)]);
+    quick_run("fbink", vec!["--cls", &format!("--background={}", &color), "--wait"]);
 }
 
 fn clear_canvas_partly(color: &str, top: u32, left: u32, width: u32, height: u32) {
-    quick_run("fbink", vec!["--cls", &format!("top={},left={},width={},height={}", top, left, width, height), &format!("--background={}", &color)]);
+    quick_run("fbink", vec!["--cls", &format!("top={},left={},width={},height={}", top, left, width, height), &format!("--background={}", &color), "--wait"]);
 }
 
 fn rem_last(value: &str) -> &str {
@@ -588,7 +628,7 @@ fn scale_calc(v: u32, scale: f32) -> u32 {
     (v as f32 * scale).round() as u32
 }
 
-fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_keeper: PointerEventsKeeper, width: u32, height: u32, scale: f32) {
+fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_keeper: PointerEventsKeeper, width: u32, height: u32, scale: f32, disable_scrub: bool) {
     log!("ui", "visible is false");
     let mut player_visible: bool = false;
     let mut selector_visible: bool = false;
@@ -617,47 +657,56 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
     let PREV_NEXT_BTN_LR_PAD = scale_calc(10, scale);
     let PAD_FROM_COVER = scale_calc(35, scale);
     let PAD_FROM_COVER_ABS = PAD_FROM_COVER + width;
-    let mut prev = BoundingBoxTextInteractive(PREV_NEXT_BTN_LR_PAD, PREV_NEXT_BTN_LR_PAD + scale_calc(100, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("Previous"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut prev = BoundingBoxTextInteractive::new(PREV_NEXT_BTN_LR_PAD, PREV_NEXT_BTN_LR_PAD + scale_calc(100, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), 0, 0, String::from("Previous"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
     let back5sleft = (width/2)-9-scale_calc(52, scale)-FORWARD_BACKWARD_BTN_PAD;
-    let mut back5s = BoundingBoxTextInteractive(back5sleft, back5sleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("< 5s"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
-    
+    let mut back5s = BoundingBoxTextInteractive::new(back5sleft, back5sleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), 0, 0, String::from("< 5s"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+
     let playleft = (width/2)-scale_calc(9, scale);
-    let mut play = BoundingBoxTextInteractive(playleft, playleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("▶"), scale_calc(15, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
-    let mut pause = BoundingBoxTextInteractive(playleft, playleft + scale_calc(40, scale), PAD_FROM_COVER_ABS-scale_calc(7, scale), PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("| |"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut play = BoundingBoxTextInteractive::new(playleft, playleft + scale_calc(40, scale), PAD_FROM_COVER_ABS-scale_calc(6, scale), PAD_FROM_COVER_ABS + scale_calc(40, scale), 0, 0, String::from("▶"), scale_calc(16, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut pause = BoundingBoxTextInteractive::new(playleft, playleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), 0, 0, String::from("| |"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
     let forward5sleft = (width/2)-9+20+FORWARD_BACKWARD_BTN_PAD;
-    let mut forward5s = BoundingBoxTextInteractive(forward5sleft, forward5sleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("5s >"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut forward5s = BoundingBoxTextInteractive::new(forward5sleft, forward5sleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), 0, 0, String::from("5s >"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
+    if disable_scrub {
+        back5s.disable();
+        forward5s.disable();
+    }
+
     let nextleft = width - scale_calc(60, scale);
-    let mut next = BoundingBoxTextInteractive(nextleft, nextleft + scale_calc(100, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("Next"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut next = BoundingBoxTextInteractive::new(nextleft, nextleft + scale_calc(100, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), 0, 0, String::from("Next"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
     let closeleft = width-10-14-scale_calc(40, scale);
     let closetop = height-10-14-scale_calc(50, scale);
-    let mut close = BoundingBoxTextInteractive(closeleft, width, closetop, height, String::from("✕"), scale_calc(20, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut close = BoundingBoxTextInteractive::new(closeleft, width, closetop, height, 0, 0, String::from("✕"), scale_calc(20, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
 
-    let mut volume_control = BoundingBoxTextInteractive(0, width, 0, height/2, String::new(), 1, String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut volume_control = BoundingBoxTextInteractive::new(0, width, 0, height/2, 0, 0, String::new(), 1, String::from("BLACK"), String::from("WHITE"), Elapsed::new());
 
     // buttons for selector UI
-    let mut letter_width = width/12;
     let mut height_8_segments_height = height/8;
-    let mut box_y_start = height_8_segments_height/2 + height_8_segments_height*2;
+    //let mut box_y_start = height_8_segments_height/2 + height_8_segments_height*2;
+    let mut box_y_start = height - height_8_segments_height - height_8_segments_height*3/5 - height_8_segments_height;
     let mut box_y_end = box_y_start + height_8_segments_height;
-    let mut numerals_y_start = box_y_start + height_8_segments_height*3/5;
+    let mut numerals_y_start = box_y_start + height_8_segments_height*3/5 + scale_calc(8, scale);
+    let mut letter_width = width/14;
+    let mut lr_pad = letter_width;
     let mut selector_pad = 20;
-    let mut numeral_display_pad = 30;
+    let mut numeral_display_pad = letter_width;
 
     let mut numerals: Vec<BoundingBoxTextInteractive> = Vec::new();
-    for i in 0..10 {
-        let value = (i+1)%10;
-        numerals.push(BoundingBoxTextInteractive(letter_width*i+selector_pad, letter_width*(i+1), numerals_y_start, box_y_end, value.to_string(), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
+    for i in 1..11 {
+        let value = i%10;
+        numerals.push(BoundingBoxTextInteractive::new(letter_width*i, letter_width*(i+1), numerals_y_start, box_y_end, selector_pad, 0, value.to_string(), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
     }
-    numerals.push(BoundingBoxTextInteractive(letter_width*10+selector_pad, letter_width*11, numerals_y_start, box_y_end, String::from("←"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
-    numerals.push(BoundingBoxTextInteractive(letter_width*11+selector_pad, width, numerals_y_start, box_y_end, String::from("OK"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
+    numerals.push(BoundingBoxTextInteractive::new(letter_width*11, letter_width*12, numerals_y_start, box_y_end, selector_pad, 0, String::from("←"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
+    numerals.push(BoundingBoxTextInteractive::new(letter_width*12, width, numerals_y_start, box_y_end, selector_pad, 0, String::from("OK"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
 
     let mut set_numeral_display = |v: &str, numerals: &Vec<BoundingBoxTextInteractive>| {
-        clear_canvas_partly("WHITE", box_y_start, 0, width, box_y_end-box_y_start);
-        draw_text(v, 34, box_y_start+numeral_display_pad, numeral_display_pad, "bold", "WHITE", "BLACK");
+        clear_canvas_partly("WHITE", box_y_start, lr_pad, width-lr_pad, numerals_y_start+34-box_y_start);
+        draw_text("_____________________________________________________________", 20, box_y_start-20, numeral_display_pad+selector_pad, "regular", "WHITE", "BLACK");
+        draw_text("_____________________________________________________________", 20, box_y_end-20, numeral_display_pad+selector_pad, "regular", "WHITE", "BLACK");
+        draw_text(v, 34, box_y_start+height_8_segments_height/4 + scale_calc(2, scale), numeral_display_pad+selector_pad, "bold", "WHITE", "BLACK");
         for b in numerals {
             b.draw();
         }
@@ -689,9 +738,6 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
                                     current_selection_panel_value = rem_last(&current_selection_panel_value).to_string();
                                     set_numeral_display(&current_selection_panel_value, &numerals);
                                 } else {
-                                    if cfg!(feature = "kindle") {
-                                        quick_run("sh", vec![&root("bin/enable-touch.sh").display().to_string()]);
-                                    }
                                     selector_visible = false;
                                     println!("ABC611");
                                     events_keeper.end_thread();
@@ -719,9 +765,6 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
                         } else if next.colliding_coords(&coords) {
                             sender.send(ControlMsg::NEXT());
                         } else if close.colliding_coords(&coords) {
-                            if cfg!(feature = "kindle") {
-                                quick_run("sh", vec![&root("bin/enable-touch.sh").display().to_string()]);
-                            }
                             sender.send(ControlMsg::UIHIDDEN());
                             player_visible = false;
                             println!("ABC211");
@@ -869,20 +912,18 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
             Ok((mut socket, addr)) => {
                 let mut cmd = String::new();
                 socket.read_to_string(&mut cmd);
-                if cfg!(feature = "kindle") {
-                    quick_run("sh", vec![&root("bin/disable-touch.sh").display().to_string()]);
-                }
                 if cmd.starts_with("select") {
-                    selector_visible = true;
-                    println!("ABC311");
-                    events_keeper.end_thread();
-                    println!("ABC312");
-                    events_keeper.grab();
-                    println!("ABC314");
-                    events_keeper.start_thread();
-                    println!("ABC315");
-                    for b in &numerals {
-                        b.draw();
+                    if current_track.is_some() {
+                        selector_visible = true;
+                        println!("ABC311");
+                        events_keeper.end_thread();
+                        println!("ABC312");
+                        events_keeper.grab();
+                        println!("ABC314");
+                        events_keeper.start_thread();
+                        println!("ABC315");
+                        clear_canvas_partly("WHITE", box_y_start, lr_pad, width-lr_pad, height_8_segments_height);
+                        set_numeral_display("", &numerals);
                     }
                 } else if cmd.starts_with("ui") {
                     if let Some(current_track) = &current_track {

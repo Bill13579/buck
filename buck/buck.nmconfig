@@ -1,0 +1,3 @@
+menu_item:main:Open Player:cmd_spawn:/mnt/onboard/.buck/buck-cli
+menu_item:main:Open Selector:cmd_spawn:/mnt/onboard/.buck/buck-cli selector
+menu_item:main:Close Buck:cmd_spawn:pkill -f buck

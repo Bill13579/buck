@@ -92,12 +92,12 @@ pub fn gentoc(tracks: &Vec<Track>, pdf_output_path: PathBuf) {
 
     let mut current_album = &tracks[0];
     let mut first_track = true;
-    doc.push(gen_album_layout(&current_album.album, &current_album.artist).padded(Margins::trbl(15 as i8, 0 as i8, 3 as i8, 0 as i8)));
+    doc.push(gen_album_layout(&current_album.album, &current_album.album_artist).padded(Margins::trbl(15 as i8, 0 as i8, 3 as i8, 0 as i8)));
     for (t, i) in tracks.iter().zip(0..tracks.len()) {
         if current_album.album != t.album {
             first_track = true;
             current_album = &t;
-            doc.push(gen_album_layout(&current_album.album, &current_album.artist).padded(Margins::trbl(15 as i8, 0 as i8, 2 as i8, 0 as i8)));
+            doc.push(gen_album_layout(&current_album.album, &current_album.album_artist).padded(Margins::trbl(15 as i8, 0 as i8, 2 as i8, 0 as i8)));
         }
         doc.push(gen_song_layout(&t.title, &t.artist, i as u32+1, &mut first_track).padded(Margins::trbl(9 as i8, 0 as i8, 0 as i8, 0 as i8)));
     }

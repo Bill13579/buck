@@ -11,6 +11,7 @@ use std::io::{Write, BufReader, Read};
 use std::process::{exit};
 use std::time::Duration;
 use crate::read_config::root;
+use crate::utils::elapsed::Elapsed;
 use crate::{log, error, result};
 
 pub struct BTKeepAlive {
@@ -38,6 +39,10 @@ impl BTKeepAlive {
                         1 => true,
                         2 => {
                             stdin.write_all(b"scan on\n");
+                            let elapsed = Elapsed::new();
+                            while elapsed.elapsed() <= Duration::from_secs(10) {
+                                rx.try_recv();
+                            }
                             false
                         },
                         _ => false

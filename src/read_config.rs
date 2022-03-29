@@ -29,7 +29,8 @@ pub struct BuckConfig {
     pub ui: BuckUIConfig,
     pub documents_dir: String,
     pub music_dirs: Vec<String>,
-    pub event_paths: BuckEventPaths
+    pub event_paths: BuckEventPaths,
+    pub disable_scrub: bool
 }
 
 pub fn root(s: &str) -> PathBuf {

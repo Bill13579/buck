@@ -5,6 +5,9 @@ build/
 # General
 .vagrant/
 
+# Kobo packaging directory
+kobo-packaging/
+
 # Log files (if you are creating logs in debug mode, uncomment this)
 # *.log
 
