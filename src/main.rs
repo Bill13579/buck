@@ -702,13 +702,15 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
     numerals.push(BoundingBoxTextInteractive::new(letter_width*11, letter_width*12, numerals_y_start, box_y_end, selector_pad, 0, String::from("←"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
     numerals.push(BoundingBoxTextInteractive::new(letter_width*12, width, numerals_y_start, box_y_end, selector_pad, 0, String::from("OK"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
 
-    let mut set_numeral_display = |v: &str, numerals: &Vec<BoundingBoxTextInteractive>| {
-        clear_canvas_partly("WHITE", box_y_start, lr_pad, width-lr_pad, numerals_y_start+34-box_y_start);
-        draw_text("_____________________________________________________________", 20, box_y_start-20, numeral_display_pad+selector_pad, "regular", "WHITE", "BLACK");
-        draw_text("_____________________________________________________________", 20, box_y_end-20, numeral_display_pad+selector_pad, "regular", "WHITE", "BLACK");
+    let mut set_numeral_display = |v: &str, numerals: &Vec<BoundingBoxTextInteractive>, first_run: bool| {
+        clear_canvas_partly("WHITE", box_y_start, lr_pad, width-lr_pad, numerals_y_start-5-box_y_start);
         draw_text(v, 34, box_y_start+height_8_segments_height/4 + scale_calc(2, scale), numeral_display_pad+selector_pad, "bold", "WHITE", "BLACK");
-        for b in numerals {
-            b.draw();
+        if first_run {
+            //draw_text("_____________________________________________________________", 20, box_y_start-20, numeral_display_pad+selector_pad, "regular", "WHITE", "BLACK");
+            draw_text("_____________________________________________________________", 20, box_y_end-40, numeral_display_pad+selector_pad, "regular", "WHITE", "BLACK");
+            for b in numerals {
+                b.draw();
+            }
         }
     };
 
@@ -733,10 +735,10 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
                                 if i < 10 {
                                     let value = (i+1)%10;
                                     current_selection_panel_value.push_str(&value.to_string());
-                                    set_numeral_display(&current_selection_panel_value, &numerals);
+                                    set_numeral_display(&current_selection_panel_value, &numerals, false);
                                 } else if i == 10 {
                                     current_selection_panel_value = rem_last(&current_selection_panel_value).to_string();
-                                    set_numeral_display(&current_selection_panel_value, &numerals);
+                                    set_numeral_display(&current_selection_panel_value, &numerals, false);
                                 } else {
                                     selector_visible = false;
                                     println!("ABC611");
@@ -923,7 +925,7 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
                         events_keeper.start_thread();
                         println!("ABC315");
                         clear_canvas_partly("WHITE", box_y_start, lr_pad, width-lr_pad, height_8_segments_height);
-                        set_numeral_display("", &numerals);
+                        set_numeral_display("", &numerals, true);
                     }
                 } else if cmd.starts_with("ui") {
                     if let Some(current_track) = &current_track {
