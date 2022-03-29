@@ -63,6 +63,7 @@ impl BTKeepAlive {
     }
     pub fn scan_on_temp(&mut self) {
         self.tx.send(2);
+        sleep(Duration::from_secs(1));
     }
 }
 impl Drop for BTKeepAlive {

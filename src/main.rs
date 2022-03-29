@@ -52,6 +52,7 @@ enum ControlMsg {
     NEXT(),
     PREV(),
     SETVOL(u32),
+    SETPOS(f32),
     SETTRACK(u32),
     GETVOL(),
     GETCURRENTTRACK(),
@@ -362,6 +363,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         set_currently_paused(&mut currently_paused, false);
                         log!("player-control", "mplayer: {}", "seek");
                         stdin.write_all(b"seek -5 0\n");
+                    },
+                    ControlMsg::SETPOS(v) => {
+                        if cfg!(feature = "btonly") {
+                            if let Some(ka) = &mut btonly_keepalive { ka.scan_on_temp(); }
+                        }
+                        set_currently_paused(&mut currently_paused, false);
+                        log!("player-control", "mplayer: {} {}", "seek", v);
+                        stdin.write_all(format!("seek {:.2} 2\n", length_of_song as f32 * v).as_bytes());
                     },
                     ControlMsg::NEXT() => {
                         kill_and_wait(&mut child);
@@ -684,6 +693,7 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
     let mut close = BoundingBoxTextInteractive::new(closeleft, width, closetop, height, 0, 0, String::from("✕"), scale_calc(20, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
 
     let mut volume_control = BoundingBoxTextInteractive::new(0, width, 0, height/2, 0, 0, String::new(), 1, String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut seek_control = BoundingBoxTextInteractive::new(0, width, height/2, width, 0, 0, String::new(), 1, String::from("BLACK"), String::from("WHITE"), Elapsed::new());
 
     // buttons for selector UI
     let mut height_8_segments_height = height/8;
@@ -790,6 +800,10 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
                             }
                             let new_vol = ((x - lr_minmax_margin) * 100.0 / variable_margin).round() as u32;
                             sender.send(ControlMsg::SETVOL(new_vol));
+                        } else if seek_control.colliding_coords(&coords) {
+                            let mut x = seek_control.local_coords(coords.x, coords.y).x as f32;
+                            let new_pos = x / width as f32;
+                            sender.send(ControlMsg::SETPOS(new_pos));
                         }
                     }
                 },
