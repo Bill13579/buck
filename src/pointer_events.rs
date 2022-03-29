@@ -41,13 +41,6 @@ impl Drop for Epoll {
     }
 }
 
-pub struct PointerEvent {
-    pub ts: u64,
-    pub e_type: u16,
-    pub e_code: u16,
-    pub e_value: u32
-}
-
 pub struct PointerEventsReader {
     dev: Arc<Mutex<Device>>,
     update_thread: Option<JoinHandle<()>>,
@@ -102,7 +95,7 @@ impl PointerEventsReader {
                         break;
                     }
                 }
-                if let Ok(a) = rx_lock.recv_timeout(Duration::from_millis(10)) {
+                if let Ok(_) = rx_lock.recv_timeout(Duration::from_millis(10)) {
                     break;
                 }
             }

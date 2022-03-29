@@ -332,7 +332,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             *currently_paused = v;
             reply_tx.send(ControlMsg::PAUSED(v));
         };
-        set_currently_paused(&mut currently_paused, false);
         let (mut child, mut stdin, mut stdout, mut length_of_song) = spawn_mplayer(currently_playing, current_volume, &mut btonly_keepalive);
         set_currently_paused(&mut currently_paused, true);
         stdin.write_all(b"pause\n"); //start paused by default
@@ -374,6 +373,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         stdin = tmp.1;
                         stdout = tmp.2;
                         length_of_song = tmp.3;
+                        set_currently_paused(&mut currently_paused, false);
                     },
                     ControlMsg::PREV() => {
                         kill_and_wait(&mut child);
@@ -385,6 +385,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         stdin = tmp.1;
                         stdout = tmp.2;
                         length_of_song = tmp.3;
+                        set_currently_paused(&mut currently_paused, false);
                     },
                     ControlMsg::SETVOL(v) => {
                         log!("player-control", "mplayer: volume {}", v);
@@ -403,6 +404,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             stdin = tmp.1;
                             stdout = tmp.2;
                             length_of_song = tmp.3;
+                            set_currently_paused(&mut currently_paused, false);
                         } else {
                             log!("player-control", "-set- track number received is out of range ({})! ignoring..", t);
                             println!("out of range");
