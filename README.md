@@ -26,25 +26,24 @@ E-ink devices have traditionally been only for reading... well no more!
 1. Stop Nickel from scanning hidden directories
 ```
 Add
-
-  [FeatureSettings]
-  ExcludeSyncFolders=\\.(?!kobo|adobe).*?
-
+    [FeatureSettings]
+    ExcludeSyncFolders=\\.(?!kobo|adobe).*?
 to
-
-  (from USB connection) .kobo/Kobo/Kobo\ eReader.conf
+    (from USB connection) .kobo/Kobo/Kobo\ eReader.conf
 ```
 
-2. Setup Bluetooth playback
-```
-Add
-
-  defaults.bluealsa.device "00:00:00:00:00:00"
-
-to
-
-  (from telnet connection, temporarily enable via devmodeon in the search bar) /etc/alsa/conf.d/20-bluealsa.conf
-```
+2. Setup Bluetooth playback<br/>
+    1. Enter `devmodeon` in the Kobo search bar
+    2. Go to `More > Settings > Device information > IP address`, and take note of the IP
+    3. Back on your machine, install `telnet`
+    4. Do `telnet <the kobo's ip>`
+    5. **From this shell, you can now access /etc/alsa/conf.d/20-bluealsa.conf**
+    6. Do `vi /etc/alsa/conf.d/20-bluealsa.conf`
+    7. Type `I` on your keyboard to go into insert mode
+    8. At the top, add this line: `defaults.bluealsa.device "00:00:00:00:00:00"` 
+    9. Do `Esc`, `:wq`, `Enter`
+    10. Exit out of the shell `exit`
+    11. Enter `devmodeoff` in the Kobo search bar
 
 3. Install <a href="https://github.com/pgaskin/NickelMenu/releases">NickelMenu</a>
 
