@@ -1,0 +1,1 @@
+sudo mount -t vboxsf vagrant /vagrant

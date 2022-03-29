@@ -1,9 +1,14 @@
+// process_runner.rs
+// Quick process runner
+
 use std::{process::{Command, Output, ExitStatus}, os::unix::prelude::CommandExt};
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{Write, BufReader, Read};
 use std::process::{exit};
 use crate::{result, log, error};
+
+use crate::read_config::root;
 
 pub fn quick_run(target: &str, args: Vec<&str>) {
     let mut child = result!(Command::new(target).args(args).spawn());

@@ -1,5 +1,14 @@
 {
+    "ui": {
+        "width": 600,
+        "height": 800,
+        "scale": 1.0
+    },
+    "documents_dir": "/mnt/us/documents",
     "music_dirs": [
         "/mnt/us/music"
-    ]
+    ],
+    "event_paths": {
+        "pointer": "/dev/input/event3"
+    }
 }

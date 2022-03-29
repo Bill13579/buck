@@ -1,15 +1,19 @@
-use std::{process::Command, fs::OpenOptions, io::Write};
+// toc.rs
+// Table of Contents generator
+
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 
 use genpdf::{self, Alignment, Mm, Element, style::{Style, Color}, elements::{Paragraph, TableLayout}, Margins};
 use textwrap::wrap;
 
 use crate::{Track, log, result, error, process_runner::{quick_write, quick_run}};
+use crate::read_config::root;
 
-pub fn gentoc(tracks: &Vec<Track>) {
+pub fn gentoc(tracks: &Vec<Track>, pdf_output_path: PathBuf) {
 
     log!("gentoc", "starting...");
 
-    let font_family = result!(genpdf::fonts::from_files("/mnt/us/buck/assets", "Bookerly", None));
+    let font_family = result!(genpdf::fonts::from_files(root("assets"), "Bookerly", None));
 
     let mut doc = genpdf::Document::new(font_family);
 
@@ -104,7 +108,8 @@ pub fn gentoc(tracks: &Vec<Track>) {
 
     quick_write(2, "* Rendering the Table of Contents...");
     quick_write(3, "   (this might take a while)");
-    doc.render_to_file("/mnt/us/documents/Buck - Table of Contents.pdf").expect("failed to write T.O.C. to filesystem");
+    println!("{}", pdf_output_path.display().to_string());
+    doc.render_to_file(pdf_output_path).expect("failed to write T.O.C. to filesystem");
     quick_write(4, "* Done!");
 
     log!("gentoc", "write complete");

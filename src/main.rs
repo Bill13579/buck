@@ -3,6 +3,7 @@ mod read_config;
 mod pointer_events;
 mod process_runner;
 mod logger;
+mod btctl_keepalive;
 
 use process_runner::quick_run;
 use walkdir::{WalkDir};
@@ -13,7 +14,7 @@ use std::io::{Write, BufReader, Read};
 use std::ops::{Add, Sub};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
-use std::process::{Stdio, exit, ChildStdin, ChildStdout};
+use std::process::{Stdio, exit, ChildStdin, ChildStdout, Child};
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::thread::{self, current, sleep};
@@ -24,6 +25,7 @@ use std::{str, vec, fmt};
 use std::fs::{self, OpenOptions};
 use std::io::BufRead;
 
+use crate::read_config::root;
 use crate::process_runner::quick_write;
 
 #[derive(Clone)]
@@ -52,6 +54,8 @@ enum ControlMsg {
     GETCURRENTTRACK(),
     GETCURRENTTRACKLENGTH(),
     GETTRACKINFO(u32),
+    UIHIDDEN(),
+    UIOPENED(),
 
     CURRENTTRACK(u32),
     NEWTRACK(u32),
@@ -63,7 +67,7 @@ enum ControlMsg {
 
 }
 
-fn get_num_from_process<T: Add<Output=T> + Sub<Output=T> + FromStr, F: Fn(String) -> String>(stdout: &mut BufReader<ChildStdout>, process_string: F) -> Option<T> {
+fn get_num_from_process<T: Add<Output=T> + Sub<Output=T> + FromStr, F: Fn(String) -> String>(stdout: &mut BufReader<ChildStdout>, process_string: F, goal: T) -> Option<T> {
     let mut v: Option<T> = None;
     loop {
         let mut l = String::new();
@@ -82,11 +86,31 @@ fn get_num_from_process<T: Add<Output=T> + Sub<Output=T> + FromStr, F: Fn(String
     v
 }
 
+fn check_output_for_or_exited<F: Fn(String) -> bool>(stdout: &mut BufReader<ChildStdout>, process_string: F) -> bool {
+    loop {
+        let mut l = String::new();
+        if let Ok(a) = stdout.read_line(&mut l) {
+            if a == 0 {
+                return false;
+            }
+        }
+        l = l.replace("\n", "");
+        if process_string(l) { return true; }
+    }
+}
+
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry.file_name()
          .to_str()
          .map(|s| s.starts_with("."))
          .unwrap_or(false)
+}
+
+fn kill_and_wait(child: &mut Child) {
+    if let Ok(_) = child.kill() {
+        sleep(Duration::from_millis(10));
+    }
+    sleep(Duration::from_millis(100));
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -186,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log!("main", "starting T.O.C. generation...");
     // generate T.O.C. pdf
-    toc::gentoc(&tracks);
+    toc::gentoc(&tracks, PathBuf::from(&config.documents_dir).join("Buck - Table of Contents.pdf"));
 
     log!("main", "spawning player control thread...");
     // spawn player control thread
@@ -194,18 +218,74 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (reply_tx, reply_rx) = mpsc::channel::<ControlMsg>();
     thread::spawn(move || {
         log!("player-control", "");
+        let mut btonly_keepalive: Option<btctl_keepalive::BTKeepAlive> = None;
+        let mut last_time_pos: f32 = 0.0;
         let mut first_play = true;
         let mut current_volume: u32 = 60;
-        let mut spawn_mplayer = |i: u32, current_volume: u32| {
+        let mut spawn_mplayer_base = |i: u32, current_volume: u32| {
             first_play = true;
-            let mut child = result!(Command::new("/mnt/us/buck/bin/mplayer").args(vec![
-                "-slave", "-quiet", "-demuxer", "35", "-volume", &current_volume.to_string(), "-softvol", "-softvol-max", "190", &tracks[i as usize].path.to_string_lossy().to_string()
-            ]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn());
-            let mut stdin = child.stdin.take().unwrap();
+            let current_volume_str = current_volume.to_string();
+            let track_path_str = tracks[i as usize].path.to_string_lossy().to_string();
+            let mut child_args = vec![
+                "-slave", "-quiet", "-volume", &current_volume_str, "-softvol", "-softvol-max", "110", &track_path_str
+            ];
+            if cfg!(feature = "kindle") {
+                child_args.insert(2, "35");
+                child_args.insert(2, "-demuxer");
+            }
+            if cfg!(feature = "btonly") {
+                child_args.insert(0, "alsa:device=bluealsa");
+                child_args.insert(0, "-ao");
+            }
+            let mut child = result!(Command::new(root("bin/mplayer")).args(child_args).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn());
+            let mut stdin;
+            let mut stdout;
+            match child.stdin.take() {
+                Some(cstdin) => {
+                    stdin = cstdin;
+                },
+                None => { return None; }
+            }
+            match child.stdout.take() {
+                Some(cstdout) => {
+                    stdout = BufReader::new(cstdout);
+                },
+                None => { return None; }
+            }
+            if !check_output_for_or_exited(&mut stdout, |s: String| s.contains("AO: [alsa]")) {
+                child.wait();
+                return None;
+            }
+            Some((child, stdin, stdout))
+        };
+        let mut spawn_mplayer = |i: u32, current_volume: u32, btonly_keepalive: &mut Option<btctl_keepalive::BTKeepAlive>| {
+            let mut child;
+            let mut stdin;
+            let mut stdout;
+            quick_write(8, "* Spawning mplayer");
+            let mut attmpt_binary: bool = false;
+            loop {
+                let mplayer_result = spawn_mplayer_base(i, current_volume);
+                if let Some(mplayer) = mplayer_result {
+                    child = mplayer.0;
+                    stdin = mplayer.1;
+                    stdout = mplayer.2;
+                    break;
+                }
+                if attmpt_binary == false { attmpt_binary = true; }
+                else { attmpt_binary = false; }
+                quick_write(8, &format!("{} Mplayer spawn failed! Retrying after 5 seconds", if attmpt_binary { "|" } else { "=" }));
+                quick_write(9, "   (are you connected to a Bluetooth speaker?)");
+                sleep(Duration::from_secs(5));
+            }
+            // handle Bluetooth keep-alive for btonly devices
+            if cfg!(feature = "btonly") {
+                *btonly_keepalive = Some(btctl_keepalive::BTKeepAlive::spawn());
+            }
+            // notify UI
             reply_tx.send(ControlMsg::NEWTRACK(i));
-            let mut stdout = BufReader::new(child.stdout.take().unwrap());
             stdin.write_all(b"get_time_length\n");
-            let mut length_of_song: f32 = get_num_from_process(&mut stdout, |s| s.replace("ANS_LENGTH=", "")).unwrap();
+            let length_of_song = get_num_from_process(&mut stdout, |s| s.replace("ANS_LENGTH=", ""), 0.0f32).unwrap();
             reply_tx.send(ControlMsg::LENGTH(length_of_song));
             (child, stdin, stdout, length_of_song)
         };
@@ -216,7 +296,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             reply_tx.send(ControlMsg::PAUSED(v));
         };
         set_currently_paused(&mut currently_paused, false);
-        let (mut child, mut stdin, mut stdout, mut length_of_song) = spawn_mplayer(currently_playing, current_volume);
+        let (mut child, mut stdin, mut stdout, mut length_of_song) = spawn_mplayer(currently_playing, current_volume, &mut btonly_keepalive);
         set_currently_paused(&mut currently_paused, true);
         stdin.write_all(b"pause\n"); //start paused by default
 
@@ -232,32 +312,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         stdin.write_all(b"pause\n");
                     },
                     ControlMsg::SEEK_FORWARD() => {
+                        if let Some(ka) = &mut btonly_keepalive { ka.scan_on_temp(); }
                         set_currently_paused(&mut currently_paused, false);
                         log!("player-control", "mplayer: {}", "seek");
                         stdin.write_all(b"seek 5 0\n");
                     },
                     ControlMsg::SEEK_BACKWARD() => {
+                        if let Some(ka) = &mut btonly_keepalive { ka.scan_on_temp(); }
                         set_currently_paused(&mut currently_paused, false);
                         log!("player-control", "mplayer: {}", "seek");
                         stdin.write_all(b"seek -5 0\n");
                     },
                     ControlMsg::NEXT() => {
-                        child.kill();
+                        kill_and_wait(&mut child);
                         currently_playing += 1;
                         if currently_playing as usize >= tracks.len() { currently_playing = 0; }
                         log!("player-control", "-next- removing old player, currently playing is now {}", currently_playing);
-                        let tmp = spawn_mplayer(currently_playing, current_volume);
+                        let tmp = spawn_mplayer(currently_playing, current_volume, &mut btonly_keepalive);
                         child = tmp.0;
                         stdin = tmp.1;
                         stdout = tmp.2;
                         length_of_song = tmp.3;
                     },
                     ControlMsg::PREV() => {
-                        child.kill();
+                        kill_and_wait(&mut child);
                         if currently_playing == 0 { currently_playing = (tracks.len() - 1) as u32; }
                         else { currently_playing -= 1; }
                         log!("player-control", "-prev- removing old player, currently playing is now {}", currently_playing);
-                        let tmp = spawn_mplayer(currently_playing, current_volume);
+                        let tmp = spawn_mplayer(currently_playing, current_volume, &mut btonly_keepalive);
                         child = tmp.0;
                         stdin = tmp.1;
                         stdout = tmp.2;
@@ -273,9 +355,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ControlMsg::SETTRACK(t) => {
                         if t < tracks.len() as u32 && t >= 0 {
                             log!("player-control", "-set- removing old player, currently playing is now {}", currently_playing);
-                            child.kill();
+                            kill_and_wait(&mut child);
                             currently_playing = t;
-                            let tmp = spawn_mplayer(currently_playing, current_volume);
+                            let tmp = spawn_mplayer(currently_playing, current_volume, &mut btonly_keepalive);
                             child = tmp.0;
                             stdin = tmp.1;
                             stdout = tmp.2;
@@ -301,6 +383,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         log!("player-control", "gettrackinfo");
                         reply_tx.send(ControlMsg::TRACKINFO(tracks[t as usize].clone()));
                     },
+                    ControlMsg::UIOPENED() => {
+                        log!("player-control", "ui opened");
+                        // handle Bluetooth keep-alive for btonly devices
+                        if cfg!(feature = "btonly") {
+                            btonly_keepalive = Some(btctl_keepalive::BTKeepAlive::spawn());
+                            if currently_paused {
+                                log!("player-control", "-uiopen,restart- removing old player, currently playing is now {}", currently_playing);
+                                kill_and_wait(&mut child);
+                                let tmp = spawn_mplayer(currently_playing, current_volume, &mut btonly_keepalive);
+                                child = tmp.0;
+                                stdin = tmp.1;
+                                stdout = tmp.2;
+                                length_of_song = tmp.3;
+                                stdin.write_all(format!("seek {} 2\n", last_time_pos).as_bytes());
+                                stdin.write_all(b"pause\n"); //resume paused state
+                            }
+                        }
+                    },
+                    ControlMsg::UIHIDDEN() => {
+                        log!("player-control", "ui hidden");
+                        // handle Bluetooth keep-alive for btonly devices
+                        if cfg!(feature = "btonly") && currently_paused {
+                            btonly_keepalive = None;
+                        }
+                    },
                     _ => {}
                 }
             }
@@ -309,7 +416,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 currently_playing += 1;
                 if currently_playing >= tracks.len() as u32 { currently_playing = 0; }
                 log!("player-control", "yes! moving to next track {}", currently_playing);
-                let tmp = spawn_mplayer(currently_playing, current_volume);
+                let tmp = spawn_mplayer(currently_playing, current_volume, &mut btonly_keepalive);
                 child = tmp.0;
                 stdin = tmp.1;
                 stdout = tmp.2;
@@ -318,8 +425,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // check song current play position
             if !currently_paused {
                 let result = stdin.write_all(b"get_time_pos\n");
-                let mut time_pos_result = get_num_from_process(&mut stdout, |s| s.replace("ANS_TIME_POSITION=", ""));
+                let mut time_pos_result = get_num_from_process(&mut stdout, |s| s.replace("ANS_TIME_POSITION=", ""), 0.0f32);
                 if let Some(time_pos) = time_pos_result {
+                    last_time_pos = time_pos;
                     reply_tx.send(ControlMsg::POS(time_pos));
                 }
             }
@@ -329,9 +437,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // event manager has 'static lifetime, must exist until the end of the program
     log!("main", "booting up the events manager...");
-    let mut event_manager = PointerEventsKeeper::new("event3", 600, 800);
+    let mut event_manager = PointerEventsKeeper::new(PathBuf::from(config.event_paths.pointer), config.ui.width, config.ui.height);
+    println!("BBB1");
+    event_manager.start_thread();
+    println!("BBB2");
     log!("main", "giving control to ui...");
-    ui(&tx, &reply_rx, event_manager.rx.clone());
+    ui(&tx, &reply_rx, event_manager, config.ui.width, config.ui.height, config.ui.scale);
 
     Ok(())
 
@@ -342,7 +453,7 @@ fn draw_album_art(path: &str) {
 }
 
 fn draw_text(text: &str, size: u32, top: u32, left: u32, style: &str, bg_color: &str, fg_color: &str) {
-    let options = format!("size={},top={},left={},style={},regular=/mnt/us/buck/assets/Bookerly-Regular.ttf,bold=/mnt/us/buck/assets/Bookerly-Bold.ttf,italic=/mnt/us/buck/assets/Bookerly-Italic.ttf,bolditalic=/mnt/us/buck/assets/Bookerly-BoldItalic.ttf", size, top, left, style);
+    let options = format!("size={},top={},left={},style={},regular={},bold={},italic={},bolditalic={}", size, top, left, style, root("assets/Bookerly-Regular.ttf").display().to_string(), root("assets/Bookerly-Bold.ttf").display().to_string(), root("assets/Bookerly-Italic.ttf").display().to_string(), root("assets/Bookerly-BoldItalic.ttf").display().to_string());
     quick_run("fbink", vec!["-t", &options, "-B", bg_color, "-C", fg_color, "--bgless", text]);
 }
 
@@ -367,10 +478,20 @@ impl Elapsed {
 }
 
 // x_start, x_end, y_start, y_end, content, font_size
-struct BoundingBoxTextInteractive(u32, u32, u32, u32, String, u32, Elapsed);
+struct BoundingBoxTextInteractive (
+    u32,
+    u32,
+    u32,
+    u32,
+    String,
+    u32,
+    String,
+    String,
+    Elapsed
+);
 impl BoundingBoxTextInteractive {
     fn draw(&self) {
-        draw_text(&self.4, self.5, self.2, self.0, "regular", "black", "white");
+        draw_text(&self.4, self.5, self.2, self.0, "regular", &self.6, &self.7);
     }
     fn draw_over(&self) {
         clear_canvas_partly("black", self.2, self.0, self.1-self.0, self.3-self.2);
@@ -382,10 +503,10 @@ impl BoundingBoxTextInteractive {
         x >= self.0 && x <= self.1 && y >= self.2 && y <= self.3
     }
     fn colliding_coords(&mut self, coords: &Coords) -> bool {
-        if self.6.elapsed() < Duration::from_millis(200) {
+        if self.8.elapsed() < Duration::from_millis(200) {
             false
         } else {
-            self.6.update();
+            self.8.update();
             self.colliding(coords.x as u32, coords.y as u32)
         }
     }
@@ -394,14 +515,14 @@ impl BoundingBoxTextInteractive {
     }
 }
 
-fn draw_song(track: &Track, skip_album_art: bool) {
+fn draw_song(track: &Track, skip_album_art: bool, width: u32, height: u32, scale: f32) {
     sleep(Duration::from_millis(1000));
     if skip_album_art {
-        clear_canvas_partly("BLACK", 600, 0, 600, 200);
+        clear_canvas_partly("BLACK", width, 0, width, height - width);
     } else {
         clear_canvas("BLACK");
     }
-    clear_canvas_partly("GRAY6", 600, 0, 600, 10);
+    clear_canvas_partly("GRAY6", width, 0, width, 10);
     if !skip_album_art {
         let mut has_album_cover = false;
         if let Some(tag) = &track.tag {
@@ -422,15 +543,15 @@ fn draw_song(track: &Track, skip_album_art: bool) {
         if has_album_cover {
             draw_album_art("/tmp/bucktempalbumstore");
         } else {
-            draw_album_art("/mnt/us/buck/assets/no-album-cover.jpg")
+            draw_album_art(&root("assets/no-album-cover.jpg").display().to_string());
         }
     }
-    draw_text(&track.title, 17, 710, 10, "regular", "black", "white");
-    draw_text(&track.artist, 12, 756, 10, "italic", "black", "white");
+    draw_text(&track.title, scale_calc(17, scale), width + scale_calc(110, scale) - scale_calc(5, scale), 10, "regular", "black", "white");
+    draw_text(&track.artist, scale_calc(12, scale), width + scale_calc(156, scale) - scale_calc(5, scale), 10, "italic", "black", "white");
 }
 
-fn draw_all(t: &Track, controls: Vec<&BoundingBoxTextInteractive>, current_album_is_new: &mut bool) {
-    draw_song(t, !*current_album_is_new);
+fn draw_all(t: &Track, controls: Vec<&BoundingBoxTextInteractive>, current_album_is_new: &mut bool, width: u32, height: u32, scale: f32) {
+    draw_song(t, !*current_album_is_new, width, height, scale);
     for c in controls {
         c.draw();
     }
@@ -457,9 +578,20 @@ fn clear_canvas_partly(color: &str, top: u32, left: u32, width: u32, height: u32
     quick_run("fbink", vec!["--cls", &format!("top={},left={},width={},height={}", top, left, width, height), &format!("--background={}", &color)]);
 }
 
-fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Arc<RwLock<Receiver<CapturedPointerEvent>>>) {
+fn rem_last(value: &str) -> &str {
+    let mut chars = value.chars();
+    chars.next_back();
+    chars.as_str()
+}
+
+fn scale_calc(v: u32, scale: f32) -> u32 {
+    (v as f32 * scale).round() as u32
+}
+
+fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_keeper: PointerEventsKeeper, width: u32, height: u32, scale: f32) {
     log!("ui", "visible is false");
-    let mut visible: bool = false;
+    let mut player_visible: bool = false;
+    let mut selector_visible: bool = false;
 
     // setup socket
     fs::remove_file("/tmp/buck.sock");
@@ -472,9 +604,6 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
     };
     listener.set_nonblocking(true);
 
-    let mut width: u32 = 600;
-    let mut height: u32 = 800;
-
     sender.send(ControlMsg::GETCURRENTTRACK());
     sender.send(ControlMsg::GETCURRENTTRACKLENGTH());
     sender.send(ControlMsg::GETVOL());
@@ -483,45 +612,102 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
     let mut current_pos: f32 = 0.0;
     let mut accum_pos: f32 = 0.0;
 
-    // buttons
-    let FORWARD_BACKWARD_BTN_PAD = 30;
-    let PREV_NEXT_BTN_LR_PAD = 10;
-    let PAD_FROM_COVER = 35;
-    let PAD_FROM_COVER_ABS = PAD_FROM_COVER + 600;
-    let mut prev = BoundingBoxTextInteractive(PREV_NEXT_BTN_LR_PAD, PREV_NEXT_BTN_LR_PAD + 100, PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + 40, String::from("Previous"), 12, Elapsed::new());
+    // buttons for main player UI
+    let FORWARD_BACKWARD_BTN_PAD = scale_calc(30, scale);
+    let PREV_NEXT_BTN_LR_PAD = scale_calc(10, scale);
+    let PAD_FROM_COVER = scale_calc(35, scale);
+    let PAD_FROM_COVER_ABS = PAD_FROM_COVER + width;
+    let mut prev = BoundingBoxTextInteractive(PREV_NEXT_BTN_LR_PAD, PREV_NEXT_BTN_LR_PAD + scale_calc(100, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("Previous"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
-    let back5sleft = (600/2)-9-52-FORWARD_BACKWARD_BTN_PAD;
-    let mut back5s = BoundingBoxTextInteractive(back5sleft, back5sleft + 40, PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + 40, String::from("< 5s"), 12, Elapsed::new());
+    let back5sleft = (width/2)-9-scale_calc(52, scale)-FORWARD_BACKWARD_BTN_PAD;
+    let mut back5s = BoundingBoxTextInteractive(back5sleft, back5sleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("< 5s"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
-    let playleft = (600/2)-9;
-    let mut play = BoundingBoxTextInteractive(playleft, playleft + 40, PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + 40, String::from("▶"), 15, Elapsed::new());
-    let mut pause = BoundingBoxTextInteractive(playleft, playleft + 40, PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + 40, String::from("| |"), 12, Elapsed::new());
+    let playleft = (width/2)-scale_calc(9, scale);
+    let mut play = BoundingBoxTextInteractive(playleft, playleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("▶"), scale_calc(15, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let mut pause = BoundingBoxTextInteractive(playleft, playleft + scale_calc(40, scale), PAD_FROM_COVER_ABS-scale_calc(7, scale), PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("| |"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
-    let forward5sleft = (600/2)-9+20+FORWARD_BACKWARD_BTN_PAD;
-    let mut forward5s = BoundingBoxTextInteractive(forward5sleft, forward5sleft + 40, PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + 40, String::from("5s >"), 12, Elapsed::new());
+    let forward5sleft = (width/2)-9+20+FORWARD_BACKWARD_BTN_PAD;
+    let mut forward5s = BoundingBoxTextInteractive(forward5sleft, forward5sleft + scale_calc(40, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("5s >"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
-    let nextleft = 600 - 60;
-    let mut next = BoundingBoxTextInteractive(nextleft, nextleft + 100, PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + 40, String::from("Next"), 12, Elapsed::new());
+    let nextleft = width - scale_calc(60, scale);
+    let mut next = BoundingBoxTextInteractive(nextleft, nextleft + scale_calc(100, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), String::from("Next"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
-    let closeleft = 600-10-14-50;
-    let closetop = 800-10-14-50;
-    let mut close = BoundingBoxTextInteractive(closeleft, 600, closetop, 800, String::from("✕"), 20, Elapsed::new());
+    let closeleft = width-10-14-scale_calc(40, scale);
+    let closetop = height-10-14-scale_calc(50, scale);
+    let mut close = BoundingBoxTextInteractive(closeleft, width, closetop, height, String::from("✕"), scale_calc(20, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
 
-    let mut volume_control = BoundingBoxTextInteractive(0, width, 0, height/2, String::new(), 1, Elapsed::new());
+    let mut volume_control = BoundingBoxTextInteractive(0, width, 0, height/2, String::new(), 1, String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+
+    // buttons for selector UI
+    let mut letter_width = width/12;
+    let mut height_8_segments_height = height/8;
+    let mut box_y_start = height_8_segments_height/2 + height_8_segments_height*2;
+    let mut box_y_end = box_y_start + height_8_segments_height;
+    let mut numerals_y_start = box_y_start + height_8_segments_height*3/5;
+    let mut selector_pad = 20;
+    let mut numeral_display_pad = 30;
+
+    let mut numerals: Vec<BoundingBoxTextInteractive> = Vec::new();
+    for i in 0..10 {
+        let value = (i+1)%10;
+        numerals.push(BoundingBoxTextInteractive(letter_width*i+selector_pad, letter_width*(i+1), numerals_y_start, box_y_end, value.to_string(), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
+    }
+    numerals.push(BoundingBoxTextInteractive(letter_width*10+selector_pad, letter_width*11, numerals_y_start, box_y_end, String::from("←"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
+    numerals.push(BoundingBoxTextInteractive(letter_width*11+selector_pad, width, numerals_y_start, box_y_end, String::from("OK"), 20, String::from("WHITE"), String::from("BLACK"), Elapsed::new()));
+
+    let mut set_numeral_display = |v: &str, numerals: &Vec<BoundingBoxTextInteractive>| {
+        clear_canvas_partly("WHITE", box_y_start, 0, width, box_y_end-box_y_start);
+        draw_text(v, 34, box_y_start+numeral_display_pad, numeral_display_pad, "bold", "WHITE", "BLACK");
+        for b in numerals {
+            b.draw();
+        }
+    };
 
     let mut current_track: Option<Track> = None;
     let mut current_album_is_new: bool = true;
     let mut current_album: String = String::new();
     let mut currently_paused: bool = true;
+    let mut current_selection_panel_value: String = String::new();
 
     'eventloop: loop {
         // process new pointer events
-        let mut e = event_rx.read().unwrap().recv_timeout(Duration::from_millis(50));
+        events_keeper.check_input();
+        let mut e = events_keeper.rx.recv_timeout(Duration::from_millis(50));
         while let Ok(pointer_evt) = e {
             // only process these events if we have reign over the ui
-            if visible {
-                match pointer_evt {
-                    CapturedPointerEvent::PointerOn(coords) => {
+            match pointer_evt {
+                CapturedPointerEvent::PointerOn(coords) => {
+                    if selector_visible {
+                        let num_numerals = numerals.len();
+                        for (b, i) in numerals.iter_mut().zip(0..num_numerals) {
+                            if b.colliding_coords(&coords) {
+                                if i < 10 {
+                                    let value = (i+1)%10;
+                                    current_selection_panel_value.push_str(&value.to_string());
+                                    set_numeral_display(&current_selection_panel_value, &numerals);
+                                } else if i == 10 {
+                                    current_selection_panel_value = rem_last(&current_selection_panel_value).to_string();
+                                    set_numeral_display(&current_selection_panel_value, &numerals);
+                                } else {
+                                    if cfg!(feature = "kindle") {
+                                        quick_run("sh", vec![&root("bin/enable-touch.sh").display().to_string()]);
+                                    }
+                                    selector_visible = false;
+                                    println!("ABC611");
+                                    events_keeper.end_thread();
+                                    println!("ABC612");
+                                    events_keeper.ungrab();
+                                    println!("ABC614");
+                                    events_keeper.start_thread();
+                                    println!("ABC615");
+                                    if let Ok(new_track) = current_selection_panel_value.parse::<u32>() {
+                                        sender.send(ControlMsg::SETTRACK(new_track-1));
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    } else if player_visible {
                         if play.colliding_coords(&coords) || pause.colliding_coords(&coords) {
                             sender.send(ControlMsg::PAUSE());
                         } else if back5s.colliding_coords(&coords) {
@@ -533,8 +719,18 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
                         } else if next.colliding_coords(&coords) {
                             sender.send(ControlMsg::NEXT());
                         } else if close.colliding_coords(&coords) {
-                            quick_run("sh", vec!["/mnt/us/buck/bin/enable-touch.sh"]);
-                            visible = false;
+                            if cfg!(feature = "kindle") {
+                                quick_run("sh", vec![&root("bin/enable-touch.sh").display().to_string()]);
+                            }
+                            sender.send(ControlMsg::UIHIDDEN());
+                            player_visible = false;
+                            println!("ABC211");
+                            events_keeper.end_thread();
+                            println!("ABC212");
+                            events_keeper.ungrab();
+                            println!("ABC214");
+                            events_keeper.start_thread();
+                            println!("ABC215");
                         } else if volume_control.colliding_coords(&coords) {
                             let mut x = volume_control.local_coords(coords.x, coords.y).x as f32;
                             let lr_minmax_margin = width as f32 / 6.0;
@@ -548,12 +744,12 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
                             let new_vol = ((x - lr_minmax_margin) * 100.0 / variable_margin).round() as u32;
                             sender.send(ControlMsg::SETVOL(new_vol));
                         }
-                    },
-                    CapturedPointerEvent::PointerOff(coords) => {
                     }
+                },
+                CapturedPointerEvent::PointerOff(coords) => {
                 }
             }
-            e = event_rx.read().unwrap().recv_timeout(Duration::from_millis(50));
+            e = events_keeper.rx.recv_timeout(Duration::from_millis(50));
         }
         let mut e = receiver.recv_timeout(Duration::from_millis(50));
 
@@ -613,21 +809,22 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
                         }
                     }
                     current_album = current_track.as_ref().unwrap().album.clone();
-                    if visible {
+                    if player_visible {
                         draw_all(current_track.as_ref().unwrap(), vec![&mut prev,
                                                 &mut back5s,
                                                 &mut pause,
                                                 &mut forward5s,
                                                 &mut next,
-                                                &mut close], &mut current_album_is_new);
+                                                &mut close], &mut current_album_is_new, width, height, scale);
                     }
                 },
                 ControlMsg::LENGTH(length) => {
                     current_track_length = length;
                 },
                 ControlMsg::POS(pos) => {
+                    println!("{} {} {}", pos, current_track_length, accum_pos);
                     if current_track_length != -1.0 {
-                        let width_per_progress: u32 = 6;
+                        let width_per_progress: u32 = 12;
                         accum_pos += pos - current_pos;
                         if (accum_pos / current_track_length).abs() >= (width_per_progress as f32/width as f32) {
                             let diff_width = ((accum_pos / current_track_length) * (width as f32/width_per_progress as f32)).floor() as i64 * width_per_progress as i64;
@@ -643,7 +840,7 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
                                 end = start+1; //account for flooring
                                 start = tmp;
                             }
-                            if visible { clear_canvas_partly(color, 600, start as u32, (end - start) as u32, 10); }
+                            if player_visible { clear_canvas_partly(color, width, start as u32, (end - start) as u32, 10); }
                             last_progress_chunk_leftpad = progress_chunk_leftpad;
                             let accum_pos_sign = accum_pos.abs() / accum_pos;
                             accum_pos = ((accum_pos / current_track_length).abs() % (width_per_progress as f32/width as f32)) * accum_pos_sign;
@@ -654,13 +851,13 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
                 },
                 ControlMsg::PAUSED(b) => {
                     currently_paused = b;
-                    if visible {
+                    if player_visible {
                         draw_two_state(&b, &play, &pause);
                     }
                 },
                 ControlMsg::VOL(new_vol) => {
-                    if visible {
-                        draw_text_with_bg(&format!(" Volume {: >3} ", new_vol.to_string()), 9, 600-50, 2, "/mnt/us/buck/assets/LinLibertine_M.otf", "BLACK", "WHITE");
+                    if player_visible {
+                        draw_text_with_bg(&format!(" Volume {: >3} ", new_vol.to_string()), 9, width-50, 2, &root("assets/LinLibertine_M.otf").display().to_string(), "BLACK", "WHITE");
                     }
                 },
                 _ => {}
@@ -672,21 +869,40 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, event_rx: Ar
             Ok((mut socket, addr)) => {
                 let mut cmd = String::new();
                 socket.read_to_string(&mut cmd);
+                if cfg!(feature = "kindle") {
+                    quick_run("sh", vec![&root("bin/disable-touch.sh").display().to_string()]);
+                }
                 if cmd.starts_with("select") {
-                    let t = cmd.replace("select ", "").parse::<u32>().unwrap();
-                    sender.send(ControlMsg::SETTRACK(t-1));
+                    selector_visible = true;
+                    println!("ABC311");
+                    events_keeper.end_thread();
+                    println!("ABC312");
+                    events_keeper.grab();
+                    println!("ABC314");
+                    events_keeper.start_thread();
+                    println!("ABC315");
+                    for b in &numerals {
+                        b.draw();
+                    }
                 } else if cmd.starts_with("ui") {
                     if let Some(current_track) = &current_track {
-                        quick_run("sh", vec!["/mnt/us/buck/bin/disable-touch.sh"]);
-                        visible = true;
+                        sender.send(ControlMsg::UIOPENED());
+                        player_visible = true;
+                        println!("ABC111");
+                        events_keeper.end_thread();
+                        println!("ABC112");
+                        events_keeper.grab();
+                        println!("ABC114");
+                        events_keeper.start_thread();
+                        println!("ABC115");
                         draw_all(current_track, vec![&mut prev,
                                                 &mut back5s,
                                                 &mut pause,
                                                 &mut forward5s,
                                                 &mut next,
-                                                &mut close], &mut true);
+                                                &mut close], &mut true, width, height, scale);
                         draw_two_state(&currently_paused, &play, &pause);
-                        clear_canvas_partly("GRAYD", 600, 0, last_progress_chunk_leftpad as u32, 10);
+                        clear_canvas_partly("GRAYD", width, 0, last_progress_chunk_leftpad as u32, 10);
                     }
                 }
             },

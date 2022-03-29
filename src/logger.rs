@@ -1,34 +1,39 @@
+// logger.rs
+// Logger
+
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{Write, BufReader, Read};
 use std::process::{exit};
+use crate::read_config::root;
 
 #[macro_export]
+#[cfg(not(debug_assertions))]
 macro_rules! log {
     ($src:expr, $x:expr) => {};
     ($src:expr, $x:expr, $($y:expr),+) => {}
 }
 
-// // debug only
-// #[macro_export]
-// macro_rules! log {
-//     ($src:expr, $x:expr) => {
-//         let mut opt = OpenOptions::new();
-//         let mut file = opt.write(true).read(false).append(true).create(true).open("/mnt/us/buck/log.txt").unwrap();
-//         file.write_all(format!("[{}] {}\n", $src, $x).as_bytes());
-//         file.flush();
-//     };
-//     ($src:expr, $x:expr, $($y:expr),+) => {
-//         log!($src, format!($x, $($y),+));
-//     }
-// }
+#[macro_export]
+#[cfg(debug_assertions)]
+macro_rules! log {
+    ($src:expr, $x:expr) => {
+        let mut opt = OpenOptions::new();
+        let mut file = opt.write(true).read(false).append(true).create(true).open(root("log.txt")).unwrap();
+        file.write_all(format!("[{}] {}\n", $src, $x).as_bytes());
+        file.flush();
+    };
+    ($src:expr, $x:expr, $($y:expr),+) => {
+        log!($src, format!($x, $($y),+));
+    }
+}
 
 
 #[macro_export]
 macro_rules! error {
     ($src:expr, $x:expr) => {
         let mut opt = OpenOptions::new();
-        let mut file = opt.write(true).read(false).append(true).create(true).open("/mnt/us/buck/log.txt").unwrap();
+        let mut file = opt.write(true).read(false).append(true).create(true).open(root("log.txt")).unwrap();
         file.write_all(format!("[ERROR {}] {}\n", $src, $x).as_bytes());
         file.flush();
     };

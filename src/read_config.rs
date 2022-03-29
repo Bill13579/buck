@@ -1,3 +1,6 @@
+// read_config.rs
+// Config.json reader
+
 use std::{env, path::PathBuf};
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -10,8 +13,27 @@ use serde::{Serialize, Deserialize};
 use serde_json::Result;
 
 #[derive(Serialize, Deserialize)]
+pub struct BuckEventPaths {
+    pub pointer: String
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct BuckUIConfig {
+    pub width: u32,
+    pub height: u32,
+    pub scale: f32
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct BuckConfig {
-    pub music_dirs: Vec<String>
+    pub ui: BuckUIConfig,
+    pub documents_dir: String,
+    pub music_dirs: Vec<String>,
+    pub event_paths: BuckEventPaths
+}
+
+pub fn root(s: &str) -> PathBuf {
+    result!(env::current_exe()).parent().unwrap().join(s)
 }
 
 pub fn read_config() -> BuckConfig {
