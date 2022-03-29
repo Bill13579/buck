@@ -23,16 +23,16 @@ E-ink devices have traditionally been only for reading... well no more!
 
 # Installation on (Audiobook-enabled) Kobo devices
 
-1. Stop Nickel from scanning hidden directories
+1. Stop Nickel from scanning hidden directories (additional info: <a href="https://github.com/koreader/koreader/wiki/Installation-on-Kobo-devices">1</a> <a href="https://www.mobileread.com/forums/showthread.php?t=334223">2</a>)
 ```
 Add
     [FeatureSettings]
     ExcludeSyncFolders=\\.(?!kobo|adobe).*?
 to
-    (from USB connection) .kobo/Kobo/Kobo\ eReader.conf
+    (directly through the USB connection) .kobo/Kobo/Kobo\ eReader.conf
 ```
 
-2. Setup Bluetooth playback<br/>
+2. Setup/enable Bluetooth playback<br/>
     1. Enter `devmodeon` in the Kobo search bar
     2. Go to `More > Settings > Device information > IP address`, and take note of the IP
     3. Back on your machine, install `telnet`
@@ -50,6 +50,8 @@ to
 4. Install <a href="https://www.mobileread.com/forums/showthread.php?t=299110">FBink</a>
 
 5. Install **Buck** using the <a href="KoboRoot.tgz">KoboRoot.tgz</a> file in this repository
+
+**P.S. repeat step 5 for updating Buck!**
 
 # Installation on Kindle Touch (K5)
 
