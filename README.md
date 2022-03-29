@@ -4,7 +4,7 @@
 
 E-ink devices have traditionally been only for reading... well no more!
 
-**Buck** is a fully-fledged music player for e-ink devices (tested fully for the Kindle Touch).
+**Buck** is a fully-fledged music player for e-ink devices (tested fully for the Kobo Libra 2 and the Kindle Touch).
 
 *Features:*<br/>
 - Using the generated Table of Contents, pick the song you wanna play<br/>
