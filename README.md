@@ -26,10 +26,13 @@ E-ink devices have traditionally been only for reading... well no more!
 1. Stop Nickel from scanning hidden directories (additional info: <a href="https://github.com/koreader/koreader/wiki/Installation-on-Kobo-devices">1</a> <a href="https://www.mobileread.com/forums/showthread.php?t=334223">2</a>)
 ```
 Add
-    [FeatureSettings]
-    ExcludeSyncFolders=\\.(?!kobo|adobe).*?
+
+[FeatureSettings]
+ExcludeSyncFolders=\\.(?!kobo|adobe).*?
+
 to
-    (directly through the USB connection) .kobo/Kobo/Kobo\ eReader.conf
+
+(directly through the USB connection) .kobo/Kobo/Kobo eReader.conf
 ```
 
 2. Setup/enable Bluetooth playback<br/>
