@@ -688,9 +688,9 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
     let nextleft = width - scale_calc(60, scale);
     let mut next = BoundingBoxTextInteractive::new(nextleft, nextleft + scale_calc(100, scale), PAD_FROM_COVER_ABS, PAD_FROM_COVER_ABS + scale_calc(40, scale), 0, 0, String::from("Next"), scale_calc(12, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     
-    let closeleft = width-10-14-scale_calc(40, scale);
-    let closetop = height-10-14-scale_calc(50, scale);
-    let mut close = BoundingBoxTextInteractive::new(closeleft, width, closetop, height, 0, 0, String::from("✕"), scale_calc(20, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
+    let closeleft = width-10-14-scale_calc(55, scale);
+    let closetop = height-10-14-scale_calc(65, scale);
+    let mut close = BoundingBoxTextInteractive::new(closeleft, width, closetop, height, scale_calc(15, scale), scale_calc(15, scale), String::from("✕"), scale_calc(20, scale), String::from("BLACK"), String::from("WHITE"), Elapsed::new());
 
     let mut volume_control = BoundingBoxTextInteractive::new(0, width, 0, height/2, 0, 0, String::new(), 1, String::from("BLACK"), String::from("WHITE"), Elapsed::new());
     let mut seek_control = BoundingBoxTextInteractive::new(0, width, height/2, width, 0, 0, String::new(), 1, String::from("BLACK"), String::from("WHITE"), Elapsed::new());
