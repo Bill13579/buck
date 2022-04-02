@@ -80,7 +80,7 @@ pub fn gentoc(tracks: &Vec<Track>, pdf_output_path: PathBuf) {
         let mut artist_p = genpdf::elements::Paragraph::default().styled_string(artist, Style::new().with_font_size(20).with_color(Color::Rgb(117, 117, 117)));
         artist_p.set_alignment(Alignment::Right);
         let mut l = calculate_optimal_layout(title.len(), artist.len(), 40, 25);
-        l.insert(0, 11);
+        l.insert(0, 11.max(3 * (pos.to_string().len()) + 2));
         let mut table = genpdf::elements::TableLayout::new(l);
         table.row()
             .element(pos_p)
