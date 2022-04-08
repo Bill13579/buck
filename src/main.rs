@@ -578,7 +578,7 @@ fn draw_song(track: &Track, skip_album_art: bool, width: u32, height: u32, scale
         let mut has_album_cover = false;
         if let Some(tag) = &track.tag {
             for p in tag.pictures() {
-                if p.picture_type == PictureType::CoverFront {
+                if p.picture_type == PictureType::CoverFront || p.picture_type == PictureType::Other {
                     has_album_cover = true;
                     let mut file = OpenOptions::new()
                         .write(true)
