@@ -762,6 +762,7 @@ fn ui(sender: &Sender<ControlMsg>, receiver: &Receiver<ControlMsg>, mut events_k
                                     println!("ABC615");
                                     if let Ok(new_track) = current_selection_panel_value.parse::<u32>() {
                                         sender.send(ControlMsg::SETTRACK(new_track-1));
+                                        current_selection_panel_value = String::new();
                                     }
                                 }
                                 break;
